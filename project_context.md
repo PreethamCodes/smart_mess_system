@@ -76,7 +76,7 @@ Includes:
 - First-login profile completion
 - Student data
 - Mess data
-- 10 initial messes
+- 12 initial messes (24 hostels, 2 hostels per mess; see Section 11)
 - Student credentials
 - Unique QR generation
 - QR display
@@ -282,7 +282,7 @@ Do not expose private student photos publicly without authorization.
 
 # 11. Mess Structure
 
-The initial system contains exactly 10 messes:
+The initial system contains exactly 12 messes:
 
 - Mess 1
 - Mess 2
@@ -294,14 +294,16 @@ The initial system contains exactly 10 messes:
 - Mess 8
 - Mess 9
 - Mess 10
+- Mess 11
+- Mess 12
 
-Each student has one assigned mess.
+Each student has one assigned mess, derived automatically (server-side) from their hostel via the authoritative `hostel_mess_mapping` table — 24 university hostels (14 male, 10 female), 2 hostels per mess. Students never choose or supply their mess directly.
 
 Example:
 
-Student A → Mess 1
-Student B → Mess 2
-Student C → Mess 3
+Student A → Hostel MH - A → Mess 1
+Student B → Hostel MH - C → Mess 2
+Student C → Hostel LH - 1 → Mess 8
 
 The system must support multiple messes as a core architectural concept.
 

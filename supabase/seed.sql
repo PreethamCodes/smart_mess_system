@@ -2,7 +2,7 @@
 -- SMART MESS MANAGEMENT & AUTOMATION SYSTEM — COMPLETE DATABASE SETUP & SEED
 -- ==============================================================================
 -- Run this entire script in your Supabase SQL Editor to set up:
--- 1. Tables (messes, user_roles, students, mess_credentials, hostel_mess_mapping)
+-- 1. Tables (messes, user_roles, hostel_mess_mapping, students, mess_credentials, meal_transactions)
 -- 2. Grants for anon, authenticated, and service_role
 -- 3. Row Level Security (RLS) policies
 -- 4. Trigger functions for field protection
@@ -59,7 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_hostel_mess_mapping_hostel_name ON public.hostel_
 CREATE INDEX IF NOT EXISTS idx_hostel_mess_mapping_gender ON public.hostel_mess_mapping(gender);
 CREATE INDEX IF NOT EXISTS idx_hostel_mess_mapping_mess_id ON public.hostel_mess_mapping(mess_id);
 
--- 4. STUDENTS TABLE (Consolidated canonical Student ID, Gender, Year 1-5, Semester 1-2)
+-- 4. STUDENTS TABLE (Consolidated canonical Student ID, Gender, Year 1-5, Semester 1-2, Leave status)
 CREATE TABLE IF NOT EXISTS public.students (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     student_id VARCHAR(50) NOT NULL UNIQUE,
@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS public.students (
     semester INTEGER NOT NULL CHECK (semester >= 1 AND semester <= 2),
     assigned_mess_id UUID NOT NULL REFERENCES public.messes(id) ON UPDATE CASCADE,
     account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' CHECK (account_status IN ('ACTIVE', 'INACTIVE', 'SUSPENDED')),
+    is_on_leave BOOLEAN NOT NULL DEFAULT false,
     is_profile_completed BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -106,7 +107,31 @@ CREATE INDEX IF NOT EXISTS idx_mess_credentials_qr_token ON public.mess_credenti
 CREATE INDEX IF NOT EXISTS idx_mess_credentials_student_id ON public.mess_credentials(student_id);
 CREATE INDEX IF NOT EXISTS idx_mess_credentials_status ON public.mess_credentials(status);
 
--- 6. UPDATED_AT TRIGGERS
+-- 6. MEAL TRANSACTIONS TABLE (V1.2 Finalized Meal Approvals & Rejections)
+CREATE TABLE IF NOT EXISTS public.meal_transactions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
+    mess_id UUID NOT NULL REFERENCES public.messes(id) ON DELETE RESTRICT,
+    meal_type VARCHAR(20) NOT NULL CHECK (meal_type IN ('BREAKFAST', 'LUNCH', 'DINNER')),
+    meal_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('APPROVED', 'REJECTED')),
+    rejection_reason VARCHAR(100),
+    scanned_by UUID REFERENCES auth.users(id),
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Partial Unique Index: Prevents duplicate approved meals on the same date
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_approved_meal_per_day
+ON public.meal_transactions (student_id, meal_type, meal_date)
+WHERE status = 'APPROVED';
+
+CREATE INDEX IF NOT EXISTS idx_meal_transactions_student_id ON public.meal_transactions(student_id);
+CREATE INDEX IF NOT EXISTS idx_meal_transactions_mess_id ON public.meal_transactions(mess_id);
+CREATE INDEX IF NOT EXISTS idx_meal_transactions_date_meal ON public.meal_transactions(meal_date, meal_type);
+CREATE INDEX IF NOT EXISTS idx_meal_transactions_status ON public.meal_transactions(status);
+
+-- 7. UPDATED_AT TRIGGERS
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -135,7 +160,7 @@ CREATE TRIGGER set_mess_credentials_updated_at
 BEFORE UPDATE ON public.mess_credentials
 FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 
--- 7. GRANT TABLE PRIVILEGES TO SUPABASE API ROLES
+-- 8. GRANT TABLE PRIVILEGES TO SUPABASE API ROLES
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
@@ -145,12 +170,13 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authentic
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
 
--- 8. ROW LEVEL SECURITY
+-- 9. ROW LEVEL SECURITY
 ALTER TABLE public.messes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hostel_mess_mapping ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mess_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.meal_transactions ENABLE ROW LEVEL SECURITY;
 
 -- Messes RLS: Allow public/authenticated to read active messes
 DROP POLICY IF EXISTS "Allow authenticated users to read messes" ON public.messes;
@@ -256,7 +282,21 @@ TO authenticated
 USING (public.is_admin(auth.uid()))
 WITH CHECK (public.is_admin(auth.uid()));
 
--- 9. STORAGE BUCKET: student-photos
+-- Meal Transactions RLS
+DROP POLICY IF EXISTS "Students can view own meal transactions" ON public.meal_transactions;
+CREATE POLICY "Students can view own meal transactions"
+ON public.meal_transactions FOR SELECT
+TO authenticated
+USING (auth.uid() = student_id OR public.is_admin(auth.uid()));
+
+DROP POLICY IF EXISTS "Admins can insert and manage meal transactions" ON public.meal_transactions;
+CREATE POLICY "Admins can insert and manage meal transactions"
+ON public.meal_transactions FOR ALL
+TO authenticated
+USING (public.is_admin(auth.uid()))
+WITH CHECK (public.is_admin(auth.uid()));
+
+-- 10. STORAGE BUCKET: student-photos
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('student-photos', 'student-photos', false)
 ON CONFLICT (id) DO NOTHING;
@@ -279,7 +319,7 @@ USING (
     ((storage.foldername(name))[1] = auth.uid()::text OR public.is_admin(auth.uid()))
 );
 
--- 10. SEED THE 12 INITIAL MESSES (Mess 1 through Mess 12)
+-- 11. SEED THE 12 INITIAL MESSES (Mess 1 through Mess 12)
 INSERT INTO public.messes (name, is_active)
 VALUES
     ('Mess 1', true),
@@ -298,7 +338,7 @@ ON CONFLICT (name) DO UPDATE
 SET is_active = EXCLUDED.is_active,
     updated_at = now();
 
--- 11. SEED THE 24 HOSTEL -> MESS MAPPINGS
+-- 12. SEED THE 24 HOSTEL -> MESS MAPPINGS
 INSERT INTO public.hostel_mess_mapping (hostel_name, gender, mess_id)
 VALUES
     ('MH - A', 'Male', (SELECT id FROM public.messes WHERE name = 'Mess 1')),

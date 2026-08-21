@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -11,6 +12,9 @@ import {
   QrCode,
   CheckCircle2,
   Key,
+  ScanLine,
+  ArrowRight,
+  ClipboardList,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +53,7 @@ export default async function AdminDashboardPage() {
   let messes: any[] = [];
   let students: any[] = [];
   let credentials: any[] = [];
+  let todayTransactions: any[] = [];
 
   try {
     const adminDb = createAdminClient();
@@ -66,28 +71,34 @@ export default async function AdminDashboardPage() {
       // Ignore background bootstrap error
     }
 
-    const [messesRes, studentsRes, credsRes] = await Promise.all([
+    const todayDate = new Date().toISOString().split("T")[0];
+
+    const [messesRes, studentsRes, credsRes, transRes] = await Promise.all([
       adminDb.from("messes").select("*").order("name", { ascending: true }),
       adminDb.from("students").select("*, mess:messes(name)").order("created_at", { ascending: false }),
       adminDb.from("mess_credentials").select("*").eq("status", "ACTIVE"),
+      adminDb.from("meal_transactions").select("*").eq("meal_date", todayDate).order("created_at", { ascending: false }),
     ]);
 
     messes = messesRes.data || [];
     students = studentsRes.data || [];
     credentials = credsRes.data || [];
+    todayTransactions = transRes.data || [];
   } catch (err) {
     console.error("Admin dashboard fetch error:", err);
   }
 
+  const approvedToday = todayTransactions.filter((t) => t.status === "APPROVED").length;
+
   return (
     <div className="space-y-8 py-6">
-      {/* Admin Header */}
+      {/* Admin Header with Scanner Launch Banner */}
       <div className="bg-gradient-to-r from-purple-800 via-indigo-900 to-blue-900 rounded-3xl text-white p-6 sm:p-8 shadow-xl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 backdrop-blur text-purple-200 text-xs font-semibold">
               <Shield className="w-3.5 h-3.5" />
-              <span>Phase 1 Administrative Console</span>
+              <span>University Dining Operations Console</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               University Mess Administration
@@ -96,11 +107,21 @@ export default async function AdminDashboardPage() {
               Signed in as Administrator: {user.email}
             </p>
           </div>
+
+          {/* Quick Scanner Launch Button */}
+          <Link
+            href="/admin/scanner"
+            className="inline-flex items-center justify-center gap-3 px-6 py-4 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-black text-sm uppercase tracking-wider rounded-2xl shadow-xl shadow-emerald-950/40 transition-all active:scale-95"
+          >
+            <ScanLine className="w-5 h-5" />
+            <span>Launch Meal Scanner</span>
+            <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
       </div>
 
       {/* KPI Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-purple-50 border border-purple-100 flex items-center justify-center text-purple-600 flex-shrink-0">
             <UtensilsCrossed className="w-6 h-6" />
@@ -141,13 +162,30 @@ export default async function AdminDashboardPage() {
           </div>
           <div>
             <span className="text-xs text-gray-500 font-bold uppercase tracking-wider block">
-              Active QR Credentials
+              Active QR Cards
             </span>
             <div className="text-2xl font-extrabold text-gray-900 mt-0.5">
               {credentials.length}
             </div>
             <span className="text-[11px] text-emerald-600 font-medium">
-              Unique Opaque Cards Issued
+              Unique Cards Issued
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0">
+            <ClipboardList className="w-6 h-6" />
+          </div>
+          <div>
+            <span className="text-xs text-gray-500 font-bold uppercase tracking-wider block">
+              Today&apos;s Meals
+            </span>
+            <div className="text-2xl font-extrabold text-gray-900 mt-0.5">
+              {approvedToday}
+            </div>
+            <span className="text-[11px] text-emerald-600 font-medium">
+              {todayTransactions.length} Total Scans
             </span>
           </div>
         </div>
@@ -287,29 +325,21 @@ export default async function AdminDashboardPage() {
         )}
       </div>
 
-      {/* Admin Security & Bootstrap Documentation Card */}
+      {/* Admin Security & Documentation Card */}
       <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 space-y-3 text-xs text-gray-600">
         <div className="flex items-center gap-2 text-gray-900 font-bold text-sm">
           <Key className="w-4 h-4 text-purple-600" />
-          <span>Admin Role Authorization & Bootstrap Architecture</span>
+          <span>Continuous Meal Scanning & Approval Engine</span>
         </div>
         <p>
-          Administrators in Phase 1 are managed strictly through server-side authorization. To bootstrap an administrator:
+          Administrators operate the continuous meal scanner to authenticate students in dining halls:
         </p>
         <ol className="list-decimal list-inside space-y-1 pl-1 text-gray-700">
-          <li>
-            Add the authorized university email to the <code className="bg-white px-1.5 py-0.5 border rounded font-mono text-purple-700">ADMIN_EMAILS</code> environment variable.
-          </li>
-          <li>
-            Register / Log in with that university email account.
-          </li>
-          <li>
-            The system grants the account the server-verified <code className="bg-white px-1.5 py-0.5 border rounded font-mono text-purple-700">ADMIN</code> role in <code className="font-mono">public.user_roles</code>.
-          </li>
+          <li>Select the operational mess facility and meal service window.</li>
+          <li>Scan student QR codes via the continuous live camera stream.</li>
+          <li>System executes the 6-step server-authoritative eligibility validation.</li>
+          <li>Pressing <strong className="text-gray-900">NEXT</strong> finalizes the transaction and automatically resumes the camera for the next student.</li>
         </ol>
-        <p className="text-[11px] text-gray-500">
-          Client-side role escalation is strictly prohibited by Row Level Security (RLS) policies and database constraints.
-        </p>
       </div>
     </div>
   );

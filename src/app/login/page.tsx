@@ -1,18 +1,26 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { loginSchema } from "@/lib/validations/auth";
 import { UtensilsCrossed, Mail, Lock, ShieldAlert, Loader2, ArrowRight } from "lucide-react";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Surface errors handed off by /auth/callback (e.g. an expired or already
+  // used confirmation link) or by middleware (redirected away from a
+  // protected route) instead of silently dropping them.
+  const callbackError = searchParams.get("error");
+  const redirectedFrom = searchParams.get("redirectedFrom");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(callbackError);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +65,7 @@ export default function LoginPage() {
       }
 
       // Fallback routing if post-login API was unreachable
-      router.push("/dashboard");
+      router.push(redirectedFrom || "/dashboard");
       router.refresh();
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to log in. Please check your credentials.");
@@ -151,5 +159,13 @@ export default function LoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-sm text-gray-500">Loading...</div>}>
+      <LoginContent />
+    </Suspense>
   );
 }

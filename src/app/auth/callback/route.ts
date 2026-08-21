@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Handle Token Hash OTP (e.g. signup token verification)
+  // Handle Token Hash confirmation link (fallback for older/implicit-style confirmation links)
   if (token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({
       token_hash,
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
   // If callback failed or link expired, return to login with informative query parameter
   return NextResponse.redirect(
     `${origin}/login?error=${encodeURIComponent(
-      "Email verification link expired or invalid. Please sign in or request a new OTP code."
+      "Email confirmation link expired or invalid. Please sign in, or request a new confirmation email from the signup page."
     )}`
   );
 }

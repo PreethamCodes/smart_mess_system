@@ -1,7 +1,7 @@
 # Smart Mess Management & Automation System
 ## Phase 1 — Foundation, Authentication, Identity & QR Credentials
 
-The **Smart Mess Management & Automation System** is a university-wide multi-mess platform designed to automate mess operations, starting with student identification and digital credential management across all 10 university dining facilities.
+The **Smart Mess Management & Automation System** is a university-wide multi-mess platform designed to automate mess operations, starting with student identification and digital credential management across all 12 university dining facilities.
 
 ---
 
@@ -33,8 +33,8 @@ Supabase PostgreSQL Database (Row Level Security & Triggers)
 3. **Explicit QR Generation**: QR credentials are **never generated silently**. After saving their profile, students explicitly click **"GENERATE QR"**.
 4. **Opaque & Zero-PII QR Tokens**: QR payloads contain **zero personal information** (no name, no university ID, no hostel, no photo). The payload consists solely of an opaque token (e.g. `MESS-CARD-XXXX-XXXX`).
 5. **Idempotency & Race-Condition Protection**: Repeated clicks on "GENERATE QR" return the existing active credential without creating duplicates. The database enforces this via a partial unique index `idx_unique_active_credential_per_student ON mess_credentials (student_id) WHERE status = 'ACTIVE'`.
-6. **Protected Mess Assignment**: `assigned_mess_id` is a protected administrative field. Students cannot alter their assigned mess once submitted.
-7. **10 Seeded University Messes**: The platform initializes with exactly 10 messes: `Mess 1` through `Mess 10`.
+6. **Protected Mess Assignment**: `assigned_mess_id` is a protected administrative field, derived server-side from the student's hostel via `hostel_mess_mapping`. Students cannot alter their assigned mess once submitted.
+7. **12 Seeded University Messes**: The platform initializes with exactly 12 messes: `Mess 1` through `Mess 12`, mapped from 24 university hostels (2 hostels per mess).
 8. **Controlled Admin Bootstrap**: Administrators are authorized server-side via the `ADMIN_EMAILS` environment variable. Privilege escalation from client-side requests is strictly blocked.
 
 ---
@@ -67,8 +67,11 @@ All database schemas, triggers, RLS policies, and seed data are provided in the 
 
 - `supabase/migrations/001_initial_schema.sql` — Creates `messes`, `user_roles`, `students`, and `mess_credentials` tables with indexes.
 - `supabase/migrations/002_rls_and_security.sql` — Configures Row Level Security (RLS) policies and trigger-based field protection.
-- `supabase/migrations/003_seed_messes.sql` — Seeds the 10 university messes (`Mess 1` to `Mess 10`).
-- `supabase/seed.sql` — Complete one-step setup script.
+- `supabase/migrations/003_seed_messes.sql` — Seeds the original 10 university messes (`Mess 1` to `Mess 10`).
+- `supabase/migrations/004_consolidate_student_id.sql` — Consolidates `university_id`/`registration_no` into a single canonical `student_id`; opens mess read access to `anon`.
+- `supabase/migrations/005_grant_table_permissions.sql` — Grants PostgREST table privileges (`anon`/`authenticated`/`service_role`) required for RLS to take effect.
+- `supabase/migrations/006_hostel_mess_mapping.sql` — Expands to 12 messes and adds the authoritative `hostel_mess_mapping` table (24 hostels → 12 messes, 2 hostels each).
+- `supabase/seed.sql` — Complete one-step setup script reflecting the current (12-mess) state; safe to re-run.
 
 ### Running Migrations in Supabase:
 1. Open your Supabase Project Dashboard.
@@ -120,7 +123,7 @@ Follow this 14-step checklist to test the entire Phase 1 workflow:
 | **TEST 11**| Log in again with email + password | Authenticated; redirected directly to Student Dashboard. |
 | **TEST 12**| Student tries navigating to `/admin` | Denied / redirected back to `/dashboard`. |
 | **TEST 13**| Log in with email listed in `ADMIN_EMAILS` | Admin Console accessible at `/admin`. |
-| **TEST 14**| Check Admin Console / Database messes list | Exactly 10 messes present (`Mess 1` through `Mess 10`). |
+| **TEST 14**| Check Admin Console / Database messes list | Exactly 12 messes present (`Mess 1` through `Mess 12`). |
 
 ---
 

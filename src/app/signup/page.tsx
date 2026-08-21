@@ -72,7 +72,7 @@ function SignupContent() {
         router.push("/onboarding");
         router.refresh();
       } else {
-        // Redirect to numeric OTP verification screen with email pre-populated
+        // Redirect to the email confirmation screen with email pre-populated
         router.push(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
       }
     } catch (err: any) {
@@ -168,7 +168,7 @@ function SignupContent() {
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Sending verification OTP...
+                Sending confirmation email...
               </>
             ) : (
               <>
