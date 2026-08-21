@@ -1,10 +1,16 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { studentProfileSchema, StudentProfileInput } from "@/lib/validations/student";
-import { Mess, Student, getAbsoluteSemester } from "@/types/database";
+import { Student, Gender, getAbsoluteSemester } from "@/types/database";
+import {
+  MALE_HOSTELS,
+  FEMALE_HOSTELS,
+  getHostelsForGender,
+  getMessNameForHostel,
+} from "@/lib/constants/hostels";
 import {
   User,
   Building,
@@ -15,30 +21,26 @@ import {
   Loader2,
   Camera,
   Upload,
-  RefreshCw,
   X,
   IdCard,
   RotateCcw,
   Sparkles,
+  Utensils,
+  Info,
 } from "lucide-react";
 
 interface ProfileFormProps {
   initialStudent?: Partial<Student> | null;
-  initialMesses?: Mess[];
   onSuccess?: () => void;
   isEditMode?: boolean;
 }
 
 export function ProfileForm({
   initialStudent,
-  initialMesses = [],
   onSuccess,
   isEditMode = false,
 }: ProfileFormProps) {
   const router = useRouter();
-  const [messes, setMesses] = useState<Mess[]>(initialMesses);
-  const [loadingMesses, setLoadingMesses] = useState(initialMesses.length === 0);
-  const [messError, setMessError] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -62,53 +64,22 @@ export function ProfileForm({
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const defaultGender: Gender = (initialStudent?.gender as Gender) || "Male";
+  const defaultHostel = initialStudent?.hostel || (defaultGender === "Male" ? MALE_HOSTELS[0] : FEMALE_HOSTELS[0]);
+
   const [formData, setFormData] = useState<StudentProfileInput>({
     name: initialStudent?.name || "",
     student_id: initialStudent?.student_id || "",
-    hostel: initialStudent?.hostel || "",
+    gender: defaultGender,
+    hostel: defaultHostel,
     course: initialStudent?.course || "",
     year: initialStudent?.year || 1,
     semester: initialStudent?.semester || 1,
-    assigned_mess_id: initialStudent?.assigned_mess_id || (initialMesses[0]?.id || ""),
     photo_url: initialStudent?.photo_url || "",
   });
 
-  // Fetch messes if not supplied initially
-  const fetchMesses = useCallback(async () => {
-    try {
-      setLoadingMesses(true);
-      setMessError(null);
-      const res = await fetch("/api/messes");
-      const data = await res.json();
-      if (data.success && Array.isArray(data.messes) && data.messes.length > 0) {
-        setMesses(data.messes);
-        setFormData((prev) => ({
-          ...prev,
-          assigned_mess_id: prev.assigned_mess_id || data.messes[0].id,
-        }));
-      } else {
-        setMessError("No active mess facilities found in the system.");
-      }
-    } catch (err: any) {
-      console.error("Error loading messes:", err);
-      setMessError("Failed to load university mess list. Please click retry.");
-    } finally {
-      setLoadingMesses(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (initialMesses.length > 0) {
-      setMesses(initialMesses);
-      setFormData((prev) => ({
-        ...prev,
-        assigned_mess_id: prev.assigned_mess_id || initialMesses[0].id,
-      }));
-      setLoadingMesses(false);
-    } else {
-      fetchMesses();
-    }
-  }, [initialMesses, fetchMesses]);
+  // Automatically derived mess name from selected hostel
+  const derivedMessName = getMessNameForHostel(formData.hostel) || "Mess 1";
 
   // Clean up camera stream on unmount
   useEffect(() => {
@@ -118,6 +89,30 @@ export function ProfileForm({
       }
     };
   }, [cameraStream]);
+
+  // ----------------------------------------------------------------
+  // GENDER & HOSTEL SELECTION LOGIC
+  // ----------------------------------------------------------------
+  const handleGenderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newGender = e.target.value as Gender;
+    const availableHostels = getHostelsForGender(newGender);
+    setFormData((prev) => ({
+      ...prev,
+      gender: newGender,
+      hostel: availableHostels[0],
+    }));
+
+    if (fieldErrors.gender || fieldErrors.hostel) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next.gender;
+        delete next.hostel;
+        return next;
+      });
+    }
+  };
+
+  const availableHostelOptions = getHostelsForGender(formData.gender);
 
   // ----------------------------------------------------------------
   // CAMERA HANDLING (getUserMedia API)
@@ -308,11 +303,6 @@ export function ProfileForm({
       return;
     }
 
-    // Ensure assigned mess is selected
-    if (!formData.assigned_mess_id && messes.length > 0) {
-      formData.assigned_mess_id = messes[0].id;
-    }
-
     // Client-side Zod validation
     const validationResult = studentProfileSchema.safeParse(formData);
     if (!validationResult.success) {
@@ -347,7 +337,7 @@ export function ProfileForm({
         finalPhotoUrl = uploadData.photoUrl;
       }
 
-      // Save Student Profile
+      // Save Student Profile (assigned_mess_id is derived server-side)
       const res = await fetch("/api/student/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -546,26 +536,60 @@ export function ProfileForm({
             )}
           </div>
 
-          {/* Hostel */}
+          {/* Gender */}
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              Hostel Name *
+              Gender *
             </label>
+            <select
+              name="gender"
+              value={formData.gender}
+              onChange={handleGenderChange}
+              disabled={isEditMode}
+              className={`w-full px-4 py-2.5 rounded-xl border text-sm text-gray-900 focus:outline-none focus:ring-2 ${
+                isEditMode
+                  ? "bg-gray-100 border-gray-200 cursor-not-allowed text-gray-600"
+                  : "bg-white border-gray-300 focus:ring-blue-500/20 focus:border-blue-600"
+              }`}
+              required
+            >
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+            </select>
+            {fieldErrors.gender && (
+              <p className="text-xs text-rose-600 mt-1">{fieldErrors.gender[0]}</p>
+            )}
+          </div>
+
+          {/* Hostel Name (Dynamic based on selected Gender) */}
+          <div>
+            <div className="flex justify-between items-center mb-1.5">
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                Hostel *
+              </label>
+              <span className="text-[11px] text-gray-500 font-medium">
+                {formData.gender === "Male" ? "14 Male Hostels" : "10 Female Hostels"}
+              </span>
+            </div>
             <div className="relative">
-              <Building className="w-5 h-5 text-gray-400 absolute left-3.5 top-3" />
-              <input
-                type="text"
+              <select
                 name="hostel"
                 value={formData.hostel}
                 onChange={handleChange}
-                placeholder="e.g. Men's Hostel J / Women's Hostel A"
-                className={`w-full pl-11 pr-4 py-2.5 rounded-xl border text-sm text-gray-900 focus:outline-none focus:ring-2 ${
-                  fieldErrors.hostel
-                    ? "border-rose-400 focus:ring-rose-300"
-                    : "border-gray-300 focus:ring-blue-500/20 focus:border-blue-600"
+                disabled={isEditMode}
+                className={`w-full px-4 py-2.5 rounded-xl border text-sm text-gray-900 focus:outline-none focus:ring-2 ${
+                  isEditMode
+                    ? "bg-gray-100 border-gray-200 cursor-not-allowed text-gray-600"
+                    : "bg-white border-gray-300 focus:ring-blue-500/20 focus:border-blue-600"
                 }`}
                 required
-              />
+              >
+                {availableHostelOptions.map((h) => (
+                  <option key={h} value={h}>
+                    {h}
+                  </option>
+                ))}
+              </select>
             </div>
             {fieldErrors.hostel && (
               <p className="text-xs text-rose-600 mt-1">{fieldErrors.hostel[0]}</p>
@@ -646,72 +670,34 @@ export function ProfileForm({
             )}
           </div>
 
-          {/* Assigned Mess (Protected Field) */}
+          {/* INFORMATIONAL DISPLAY: AUTOMATICALLY DERIVED ASSIGNED MESS */}
           <div className="md:col-span-2">
-            <div className="flex justify-between items-center mb-1.5">
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                Assigned Mess {isEditMode ? "(Protected Administrative Field)" : "*"}
-              </label>
-              {!isEditMode && messes.length > 0 && (
-                <span className="text-[11px] text-emerald-700 font-semibold">
-                  {messes.length} Mess Facilities Available
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+              <div className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-900">
+                  <Utensils className="w-4 h-4 text-blue-600" />
+                  <span>Assigned Mess</span>
+                </div>
+                <p className="text-xs text-gray-600">
+                  Automatically determined by university allocation for <span className="font-semibold text-gray-900">{formData.hostel}</span> (2 hostels per mess facility):
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 bg-white px-4 py-2.5 rounded-xl border border-blue-200 shadow-sm flex-shrink-0">
+                <span className="text-xs text-gray-500 font-medium">Assigned Dining:</span>
+                <span className="text-sm font-extrabold text-blue-700 font-mono">
+                  {derivedMessName}
                 </span>
-              )}
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              </div>
             </div>
-
-            {loadingMesses ? (
-              <div className="flex items-center gap-2 text-xs text-gray-500 py-3 px-4 bg-gray-50 rounded-xl border border-gray-200">
-                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
-                Loading University Messes (Mess 1 – Mess 10)...
-              </div>
-            ) : messError ? (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-xs text-rose-800">
-                <span>{messError}</span>
-                <button
-                  type="button"
-                  onClick={fetchMesses}
-                  className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-rose-300 rounded-lg text-rose-700 font-bold hover:bg-rose-100"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  Retry
-                </button>
-              </div>
-            ) : (
-              <select
-                name="assigned_mess_id"
-                value={formData.assigned_mess_id}
-                onChange={handleChange}
-                disabled={isEditMode}
-                className={`w-full px-4 py-2.5 rounded-xl border text-sm text-gray-900 focus:outline-none focus:ring-2 ${
-                  isEditMode
-                    ? "bg-gray-100 border-gray-200 cursor-not-allowed text-gray-600"
-                    : "bg-white border-gray-300 focus:ring-blue-500/20 focus:border-blue-600"
-                }`}
-                required
-              >
-                {messes.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            {isEditMode && (
-              <p className="text-xs text-amber-700 mt-1">
-                Mess assignments can only be modified by an administrator.
-              </p>
-            )}
-            {fieldErrors.assigned_mess_id && (
-              <p className="text-xs text-rose-600 mt-1">{fieldErrors.assigned_mess_id[0]}</p>
-            )}
           </div>
         </div>
 
         <div className="pt-4 border-t border-gray-100 flex justify-end">
           <button
             type="submit"
-            disabled={submitting || loadingMesses || uploadingPhoto}
+            disabled={submitting || uploadingPhoto}
             className="inline-flex items-center justify-center gap-2 px-7 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-500/20 transition-all disabled:opacity-50"
           >
             {submitting || uploadingPhoto ? (

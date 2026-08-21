@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { studentProfileSchema } from "@/lib/validations/student";
+import { getMessNameForHostel } from "@/lib/constants/hostels";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
@@ -64,43 +68,84 @@ export async function POST(request: NextRequest) {
 
     const validatedData = parseResult.data;
 
+    // -------------------------------------------------------------------------
+    // SERVER-SIDE DERIVATION: Automatic Hostel -> Mess Assignment
+    // The server NEVER trusts client-supplied assigned_mess_id.
+    // -------------------------------------------------------------------------
+    let derivedMessId: string | null = null;
+
+    // 1. Look up from database hostel_mess_mapping table
+    const { data: mappingRecord, error: mappingError } = await supabase
+      .from("hostel_mess_mapping")
+      .select("mess_id, gender, messes!inner(id, name, is_active)")
+      .eq("hostel_name", validatedData.hostel)
+      .maybeSingle();
+
+    if (mappingRecord?.mess_id) {
+      derivedMessId = mappingRecord.mess_id;
+    } else {
+      // Fallback query using admin client or mess name resolution
+      try {
+        const adminDb = createAdminClient();
+        const { data: adminMapping } = await adminDb
+          .from("hostel_mess_mapping")
+          .select("mess_id")
+          .eq("hostel_name", validatedData.hostel)
+          .maybeSingle();
+
+        if (adminMapping?.mess_id) {
+          derivedMessId = adminMapping.mess_id;
+        } else {
+          // Resolve mess name from authoritative constant map and query messes table
+          const expectedMessName = getMessNameForHostel(validatedData.hostel);
+          if (expectedMessName) {
+            const { data: messRow } = await adminDb
+              .from("messes")
+              .select("id")
+              .eq("name", expectedMessName)
+              .maybeSingle();
+            if (messRow?.id) {
+              derivedMessId = messRow.id;
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error resolving mess mapping:", err);
+      }
+    }
+
+    if (!derivedMessId) {
+      return NextResponse.json(
+        {
+          error: `Unable to derive assigned mess for hostel '${validatedData.hostel}'. Please ensure hostel mappings are seeded in database.`,
+        },
+        { status: 400 }
+      );
+    }
+
     // Check if student profile exists already
     const { data: existingStudent } = await supabase
       .from("students")
-      .select("id, is_profile_completed, assigned_mess_id")
+      .select("id, is_profile_completed, assigned_mess_id, hostel")
       .eq("id", user.id)
       .maybeSingle();
 
-    // Protection rule: If profile is already completed, student cannot modify assigned_mess_id
+    // Protection rule: If profile is already completed, student cannot modify assigned mess / hostel
     if (
       existingStudent &&
       existingStudent.is_profile_completed &&
-      existingStudent.assigned_mess_id !== validatedData.assigned_mess_id
+      existingStudent.assigned_mess_id !== derivedMessId
     ) {
       return NextResponse.json(
         {
           error:
-            "Protected Field: Students cannot modify their assigned mess. Please contact mess administration.",
+            "Protected Field: Students cannot modify their assigned mess or hostel after onboarding. Please contact mess administration.",
         },
         { status: 403 }
       );
     }
 
-    // Verify assigned mess ID exists in messes table
-    const { data: messRecord, error: messError } = await supabase
-      .from("messes")
-      .select("id, name, is_active")
-      .eq("id", validatedData.assigned_mess_id)
-      .maybeSingle();
-
-    if (messError || !messRecord || !messRecord.is_active) {
-      return NextResponse.json(
-        { error: "Invalid or inactive assigned mess selected." },
-        { status: 400 }
-      );
-    }
-
-    // Upsert student record with canonical student_id
+    // Upsert student record with canonical student_id, gender, and server-derived assigned_mess_id
     const { data: savedStudent, error: upsertError } = await supabase
       .from("students")
       .upsert(
@@ -109,12 +154,13 @@ export async function POST(request: NextRequest) {
           student_id: validatedData.student_id,
           name: validatedData.name,
           email: user.email,
+          gender: validatedData.gender,
           photo_url: validatedData.photo_url,
           hostel: validatedData.hostel,
           course: validatedData.course,
           year: validatedData.year,
           semester: validatedData.semester,
-          assigned_mess_id: validatedData.assigned_mess_id,
+          assigned_mess_id: derivedMessId,
           account_status: "ACTIVE",
           is_profile_completed: true,
         },
@@ -124,7 +170,7 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (upsertError) {
-      // Check for unique constraint violation on student_id
+      // Unique constraint violation on student_id
       if (upsertError.code === "23505") {
         return NextResponse.json(
           {

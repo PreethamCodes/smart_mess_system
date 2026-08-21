@@ -2,23 +2,59 @@ import { describe, it, expect } from "vitest";
 import { studentProfileSchema } from "../src/lib/validations/student";
 import { getAbsoluteSemester } from "../src/types/database";
 
-describe("Student Profile & Mandatory Details Validation (Phase 1 Corrections)", () => {
-  const validUUID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
-
+describe("Student Profile & Mandatory Details Validation (Automatic Hostel-Mess Architecture)", () => {
   const sampleStudent = {
     student_id: "21MCMS01",
     name: "Rahul Sharma",
-    hostel: "Men's Hostel J",
+    gender: "Male",
+    hostel: "MH - A",
     course: "MCA",
     year: 2,
     semester: 2,
-    assigned_mess_id: validUUID,
     photo_url: "https://example.com/photo.jpg",
   };
 
-  it("should accept valid student profile with single canonical Student ID", () => {
+  it("should accept valid student profile with Male gender and valid Male hostel", () => {
     const res = studentProfileSchema.safeParse(sampleStudent);
     expect(res.success).toBe(true);
+  });
+
+  it("should accept valid student profile with Female gender and valid Female hostel", () => {
+    const res = studentProfileSchema.safeParse({
+      ...sampleStudent,
+      name: "Pooja Reddy",
+      gender: "Female",
+      hostel: "LH - 9",
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it("should reject student profile if gender is missing or invalid", () => {
+    const resMissing = studentProfileSchema.safeParse({
+      ...sampleStudent,
+      gender: undefined,
+    });
+    expect(resMissing.success).toBe(false);
+
+    const resInvalid = studentProfileSchema.safeParse({
+      ...sampleStudent,
+      gender: "Other",
+    });
+    expect(resInvalid.success).toBe(false);
+  });
+
+  it("should reject student profile if hostel is not one of the configured 24 hostels", () => {
+    const resInvalidHostel = studentProfileSchema.safeParse({
+      ...sampleStudent,
+      hostel: "Men's Hostel J", // Old unstandardized format
+    });
+    expect(resInvalidHostel.success).toBe(false);
+
+    const resEmpty = studentProfileSchema.safeParse({
+      ...sampleStudent,
+      hostel: "",
+    });
+    expect(resEmpty.success).toBe(false);
   });
 
   it("should reject student profile if mandatory photo is missing", () => {
@@ -44,23 +80,6 @@ describe("Student Profile & Mandatory Details Validation (Phase 1 Corrections)",
       student_id: "ab",
     });
     expect(resTooShort.success).toBe(false);
-  });
-
-  it("should enforce assigned_mess_id must be a valid UUID", () => {
-    const resInvalidUUID = studentProfileSchema.safeParse({
-      ...sampleStudent,
-      assigned_mess_id: "Mess 1", // Name string instead of UUID
-    });
-    expect(resInvalidUUID.success).toBe(false);
-    if (!resInvalidUUID.success) {
-      expect(resInvalidUUID.error.flatten().fieldErrors.assigned_mess_id).toBeDefined();
-    }
-
-    const resEmptyMess = studentProfileSchema.safeParse({
-      ...sampleStudent,
-      assigned_mess_id: "",
-    });
-    expect(resEmptyMess.success).toBe(false);
   });
 
   it("should enforce semester within year must be strictly 1 or 2", () => {
@@ -114,15 +133,19 @@ describe("Student Profile & Mandatory Details Validation (Phase 1 Corrections)",
     expect(getAbsoluteSemester(5, 2)).toBe(10);
   });
 
-  it("should verify that obsolete fields university_id and registration_no are not in parsed schema", () => {
+  it("should verify obsolete fields university_id, registration_no, and assigned_mess_id are not in parsed input", () => {
     const inputWithObsolete = {
       ...sampleStudent,
       university_id: "OLD_UNI_ID",
       registration_no: "OLD_REG_NO",
+      assigned_mess_id: "arbitrary-uuid-from-malicious-client",
     };
     const parsed = studentProfileSchema.parse(inputWithObsolete) as any;
     expect(parsed.student_id).toBe("21MCMS01");
+    expect(parsed.gender).toBe("Male");
+    expect(parsed.hostel).toBe("MH - A");
     expect(parsed.university_id).toBeUndefined();
     expect(parsed.registration_no).toBeUndefined();
+    expect(parsed.assigned_mess_id).toBeUndefined();
   });
 });

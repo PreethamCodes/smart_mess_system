@@ -1,0 +1,11 @@
+{
+  "/dashboard/page": "app/dashboard/page.js",
+  "/login/page": "app/login/page.js",
+  "/signup/page": "app/signup/page.js",
+  "/verify-email/page": "app/verify-email/page.js",
+  "/onboarding/page": "app/onboarding/page.js",
+  "/api/student/photo-upload/route": "app/api/student/photo-upload/route.js",
+  "/api/student/profile/route": "app/api/student/profile/route.js",
+  "/api/credentials/generate/route": "app/api/credentials/generate/route.js",
+  "/dashboard/qr/page": "app/dashboard/qr/page.js"
+}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ALL_HOSTELS } from "../constants/hostels";
 
 export const studentProfileSchema = z.object({
   student_id: z
@@ -12,11 +13,15 @@ export const studentProfileSchema = z.object({
     .trim()
     .min(2, "Name must be at least 2 characters")
     .max(150, "Name cannot exceed 150 characters"),
+  gender: z.enum(["Male", "Female"], {
+    required_error: "Gender is required",
+    invalid_type_error: "Gender must be either 'Male' or 'Female'",
+  }),
   hostel: z
     .string({ required_error: "Hostel is required" })
-    .trim()
-    .min(2, "Hostel name is required")
-    .max(100, "Hostel name cannot exceed 100 characters"),
+    .refine((val) => (ALL_HOSTELS as readonly string[]).includes(val), {
+      message: "Please select a valid university hostel from the list",
+    }),
   course: z
     .string({ required_error: "Course / Program is required" })
     .trim()
@@ -32,9 +37,6 @@ export const studentProfileSchema = z.object({
     .int("Semester must be an integer")
     .min(1, "Semester must be 1 or 2")
     .max(2, "Semester must be 1 or 2"),
-  assigned_mess_id: z
-    .string({ required_error: "Assigned Mess is required" })
-    .uuid("Invalid Mess ID format"),
   photo_url: z
     .string({ required_error: "Student photo is mandatory" })
     .min(1, "Student photo is mandatory"),

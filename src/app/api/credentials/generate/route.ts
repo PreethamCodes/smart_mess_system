@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateOpaqueQRToken, doesPayloadContainPII } from "@/lib/credentials/qr";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Server-Side QR Credential Generation Endpoint
  * 

@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isEmailConfiguredAsAdmin } from "@/lib/auth/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isPreconfiguredAdminEmail } from "@/lib/auth/roles";
+
+export const dynamic = "force-dynamic";
 
 /**
- * Controlled Admin Bootstrap Route
+ * Server-Side Admin Role Bootstrap Endpoint
  * 
- * Verifies if the authenticated user's email is listed in the server-only ADMIN_EMAILS
- * environment variable. If authorized, assigns the 'ADMIN' role in public.user_roles.
- * Any unauthorized user attempting this is rejected with 403 Forbidden.
+ * Verifies if the authenticated user's email is present in ADMIN_EMAILS.
+ * If yes, grants them the ADMIN role in public.user_roles using the server service role.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -25,55 +26,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check against server-only ADMIN_EMAILS list
-    if (!isPreconfiguredAdminEmail(user.email)) {
-      return NextResponse.json(
-        {
-          error:
-            "Forbidden. This account is not listed in the authorized ADMIN_EMAILS configuration.",
-        },
-        { status: 403 }
-      );
-    }
+    const email = user.email.toLowerCase();
+    const shouldBeAdmin = isEmailConfiguredAsAdmin(email);
 
-    const adminClient = createAdminClient();
-
-    // Upsert the ADMIN role for this user
-    const { data: existingRole } = await adminClient
-      .from("user_roles")
-      .select("*")
-      .eq("user_id", user.id)
-      .eq("role", "ADMIN")
-      .maybeSingle();
-
-    if (existingRole) {
+    if (!shouldBeAdmin) {
       return NextResponse.json({
-        success: true,
-        message: "Account already has ADMIN role assigned.",
-        role: "ADMIN",
+        success: false,
+        isAdmin: false,
+        message: "Email is not configured as an authorized administrator in ADMIN_EMAILS.",
       });
     }
 
-    const { error: insertError } = await adminClient.from("user_roles").insert({
-      user_id: user.id,
-      role: "ADMIN",
-    });
+    // Grant ADMIN role in public.user_roles
+    const adminDb = createAdminClient();
+    const { data: roleEntry, error: roleError } = await adminDb
+      .from("user_roles")
+      .upsert(
+        {
+          user_id: user.id,
+          role: "ADMIN",
+        },
+        { onConflict: "user_id,role" }
+      )
+      .select()
+      .single();
 
-    if (insertError) {
+    if (roleError) {
       return NextResponse.json(
-        { error: `Failed to assign ADMIN role: ${insertError.message}` },
+        { error: `Failed to bootstrap admin role: ${roleError.message}` },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      message: "ADMIN role successfully granted to authorized account.",
-      role: "ADMIN",
+      isAdmin: true,
+      message: "Admin role successfully verified and assigned.",
+      role: roleEntry,
     });
   } catch (err: any) {
     return NextResponse.json(
-      { error: err.message || "Internal server error" },
+      { error: err.message || "Internal server error during admin bootstrap" },
       { status: 500 }
     );
   }

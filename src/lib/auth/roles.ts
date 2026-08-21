@@ -15,6 +15,8 @@ export function isPreconfiguredAdminEmail(email?: string | null): boolean {
   return adminList.includes(email.trim().toLowerCase());
 }
 
+export const isEmailConfiguredAsAdmin = isPreconfiguredAdminEmail;
+
 /**
  * Authorization helper: Verifies if a user role matches the required role.
  */
