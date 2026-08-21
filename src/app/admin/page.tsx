@@ -2,6 +2,7 @@ import React from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isPreconfiguredAdminEmail } from "@/lib/auth/roles";
 import { getAbsoluteSemester } from "@/types/database";
 import {
   Shield,
@@ -11,6 +12,8 @@ import {
   CheckCircle2,
   Key,
 } from "lucide-react";
+
+export const dynamic = "force-dynamic";
 
 export default async function AdminDashboardPage() {
   const supabase = createClient();
@@ -22,24 +25,46 @@ export default async function AdminDashboardPage() {
     redirect("/login");
   }
 
-  // Check Admin role
-  const { data: roleData } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // Authoritative Admin Role Verification
+  const email = user.email?.toLowerCase();
+  let isAdmin = isPreconfiguredAdminEmail(email);
 
-  if (roleData?.role !== "ADMIN") {
+  if (!isAdmin) {
+    const { data: roleData } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (roleData?.role === "ADMIN") {
+      isAdmin = true;
+    }
+  }
+
+  if (!isAdmin) {
     redirect("/dashboard");
   }
 
-  // Use admin client for full directory queries
+  // Use admin client for full directory queries and bootstrap
   let messes: any[] = [];
   let students: any[] = [];
   let credentials: any[] = [];
 
   try {
     const adminDb = createAdminClient();
+
+    // Ensure ADMIN role entry exists in user_roles
+    try {
+      await adminDb.from("user_roles").upsert(
+        {
+          user_id: user.id,
+          role: "ADMIN",
+        },
+        { onConflict: "user_id,role" }
+      );
+    } catch {
+      // Ignore background bootstrap error
+    }
 
     const [messesRes, studentsRes, credsRes] = await Promise.all([
       adminDb.from("messes").select("*").order("name", { ascending: true }),
@@ -88,7 +113,7 @@ export default async function AdminDashboardPage() {
               {messes.length}
             </div>
             <span className="text-[11px] text-emerald-600 font-medium">
-              Mess 1 – Mess 10 Active
+              Mess 1 – Mess 12 Active
             </span>
           </div>
         </div>
@@ -134,7 +159,7 @@ export default async function AdminDashboardPage() {
           <div>
             <h2 className="font-bold text-gray-900 text-lg">University Mess Facilities</h2>
             <p className="text-xs text-gray-500">
-              The 10 seeded university dining facilities for student allocation
+              The 12 seeded university dining facilities for student allocation
             </p>
           </div>
           <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">

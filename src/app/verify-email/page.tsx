@@ -33,7 +33,7 @@ function VerifyEmailContent() {
       setEmail(emailParam);
     }
 
-    // Check if session is already active
+    // Check if an authenticated session already exists
     async function checkExistingSession() {
       const supabase = createClient();
       const {
@@ -41,11 +41,19 @@ function VerifyEmailContent() {
       } = await supabase.auth.getSession();
 
       if (session?.user) {
-        setSuccessMsg("Email verified! Redirecting to onboarding...");
-        setTimeout(() => {
-          router.push("/onboarding");
-          router.refresh();
-        }, 800);
+        try {
+          const res = await fetch("/api/auth/post-login", { method: "POST" });
+          const data = await res.json();
+          if (data.success && data.targetUrl) {
+            router.push(data.targetUrl);
+            router.refresh();
+            return;
+          }
+        } catch {
+          // Fallback
+        }
+        router.push("/onboarding");
+        router.refresh();
       }
     }
     checkExistingSession();
@@ -68,7 +76,7 @@ function VerifyEmailContent() {
     const cleanToken = token.trim().replace(/\s+/g, "");
 
     if (!email || !cleanToken) {
-      setErrorMsg("Please enter both your university email and the 6-digit verification OTP.");
+      setErrorMsg("Please enter your university email and the verification OTP code.");
       return;
     }
 
@@ -95,41 +103,37 @@ function VerifyEmailContent() {
       if (result.error) {
         throw new Error(
           result.error.message.includes("Token has expired")
-            ? "Verification code has expired. Please click 'Resend OTP' to receive a new code."
+            ? "Verification code has expired. Please click 'RESEND CODE' to receive a new code."
             : result.error.message.includes("invalid") || result.error.message.includes("Token")
-            ? "Invalid 6-digit OTP code entered. Please check your email and try again."
+            ? "Invalid verification OTP code. Please check your university inbox and try again."
             : result.error.message
         );
       }
 
       setSuccessMsg("OTP verified successfully! Establishing session...");
 
-      // Check user profile completion to route accurately
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      // Authoritative server-side role and routing resolution
+      try {
+        const postLoginRes = await fetch("/api/auth/post-login", {
+          method: "POST",
+        });
+        const postLoginData = await postLoginRes.json();
 
-      if (user) {
-        const { data: student } = await supabase
-          .from("students")
-          .select("is_profile_completed")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        setTimeout(() => {
-          if (student && student.is_profile_completed) {
-            router.push("/dashboard");
-          } else {
-            router.push("/onboarding");
-          }
-          router.refresh();
-        }, 800);
-      } else {
-        setTimeout(() => {
-          router.push("/onboarding");
-          router.refresh();
-        }, 800);
+        if (postLoginData.success && postLoginData.targetUrl) {
+          setTimeout(() => {
+            router.push(postLoginData.targetUrl);
+            router.refresh();
+          }, 600);
+          return;
+        }
+      } catch (postLoginErr) {
+        console.error("Post-verification routing error:", postLoginErr);
       }
+
+      setTimeout(() => {
+        router.push("/onboarding");
+        router.refresh();
+      }, 600);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to verify OTP code. Please try again.");
     } finally {
@@ -157,7 +161,6 @@ function VerifyEmailContent() {
       });
 
       if (error) {
-        // Try fallback with email verification resend
         const retryRes = await supabase.auth.resend({
           type: "email_change",
           email: email.trim().toLowerCase(),
@@ -167,10 +170,10 @@ function VerifyEmailContent() {
         }
       }
 
-      setSuccessMsg("A new 6-digit numeric verification OTP has been sent to your university email.");
-      setCooldown(60); // 60 seconds cooldown
+      setSuccessMsg("A new verification code has been sent to your university email.");
+      setCooldown(60); // 60 seconds cooldown to respect rate limits
     } catch (err: any) {
-      setErrorMsg(err.message || "Failed to resend verification OTP.");
+      setErrorMsg(err.message || "Failed to resend verification code.");
     } finally {
       setResending(false);
     }
@@ -185,10 +188,10 @@ function VerifyEmailContent() {
         <div>
           <Link
             href={backUrl}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-blue-600 transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-gray-600 hover:text-blue-600 transition-colors uppercase tracking-wider"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Back to Registration</span>
+            <span>BACK</span>
           </Link>
         </div>
 
@@ -196,9 +199,9 @@ function VerifyEmailContent() {
           <div className="w-12 h-12 rounded-2xl bg-blue-600 mx-auto flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
             <MailCheck className="w-6 h-6" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Verify University Email</h2>
-          <p className="text-xs text-gray-500">
-            A numeric 6-digit OTP verification code has been dispatched to your @uohyd.ac.in inbox.
+          <h2 className="text-2xl font-bold text-gray-900">Verify Email Address</h2>
+          <p className="text-xs text-gray-600">
+            We sent a verification code to your university email.
           </p>
         </div>
 
@@ -219,7 +222,7 @@ function VerifyEmailContent() {
         <form onSubmit={handleVerify} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              University Email
+              Email
             </label>
             <input
               type="email"
@@ -234,9 +237,9 @@ function VerifyEmailContent() {
           <div>
             <div className="flex justify-between items-center mb-1.5">
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                Numeric Verification OTP *
+                Verification Code *
               </label>
-              <span className="text-[11px] text-gray-500 font-mono">6 Digits</span>
+              <span className="text-[11px] text-gray-500 font-mono">Numeric OTP</span>
             </div>
             <div className="relative">
               <KeyRound className="w-5 h-5 text-gray-400 absolute left-3.5 top-3" />
@@ -245,32 +248,31 @@ function VerifyEmailContent() {
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={token}
-                onChange={(e) => setToken(e.target.value.replace(/[^0-9]/g, "").slice(0, 8))}
+                onChange={(e) => setToken(e.target.value.replace(/[^0-9]/g, ""))}
                 placeholder="123456"
-                maxLength={6}
                 autoFocus
                 required
                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-gray-300 text-2xl font-mono font-bold tracking-[0.3em] text-center text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
             <p className="text-[11px] text-gray-400 mt-1">
-              Enter the 6-digit OTP code received in your university email.
+              Enter the OTP code received in your @uohyd.ac.in university email.
             </p>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-sm rounded-xl shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 mt-2"
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm uppercase tracking-wider rounded-xl shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 mt-2"
           >
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Verifying OTP code...
+                Verifying Code...
               </>
             ) : (
               <>
-                Verify & Continue
+                VERIFY EMAIL
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -283,14 +285,14 @@ function VerifyEmailContent() {
             type="button"
             onClick={handleResend}
             disabled={resending || cooldown > 0}
-            className="text-blue-600 font-semibold hover:underline flex items-center gap-1 disabled:opacity-50 disabled:no-underline"
+            className="text-blue-600 font-bold uppercase tracking-wider hover:underline flex items-center gap-1 disabled:opacity-50 disabled:no-underline"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${resending ? "animate-spin" : ""}`} />
             {resending
               ? "Sending..."
               : cooldown > 0
-              ? `Resend in ${cooldown}s`
-              : "Resend OTP"}
+              ? `RESEND (${cooldown}s)`
+              : "RESEND CODE"}
           </button>
         </div>
       </div>

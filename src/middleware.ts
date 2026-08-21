@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isPreconfiguredAdminEmail } from "@/lib/auth/roles";
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -59,9 +60,10 @@ export async function middleware(request: NextRequest) {
     isAuthRoute ||
     pathname === "/" ||
     pathname.startsWith("/api/auth") ||
-    pathname.startsWith("/api/messes");
+    pathname.startsWith("/api/messes") ||
+    pathname.startsWith("/api/hostels");
 
-  // If NOT authenticated and trying to access protected route
+  // 1. If NOT authenticated and trying to access protected route
   if (!user && !isPublicRoute) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
@@ -69,35 +71,67 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  // If AUTHENTICATED
+  // 2. If AUTHENTICATED
   if (user) {
-    // Check user roles
-    const { data: roleData } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // -------------------------------------------------------------------------
+    // CRITICAL: Determine role BEFORE any onboarding check.
+    // Admins NEVER get checked for student profile or redirected to /onboarding.
+    // -------------------------------------------------------------------------
+    const email = user.email?.toLowerCase();
+    let isAdmin = isPreconfiguredAdminEmail(email);
 
-    const isAdmin = roleData?.role === "ADMIN";
+    if (!isAdmin) {
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-    // If navigating to login/signup while already authenticated (except callback)
-    if (isAuthRoute && !pathname.startsWith("/auth")) {
-      const targetUrl = request.nextUrl.clone();
-      targetUrl.pathname = isAdmin ? "/admin" : "/dashboard";
-      return NextResponse.redirect(targetUrl);
-    }
-
-    // Protect /admin route: Only ADMIN role allowed
-    if (pathname.startsWith("/admin")) {
-      if (!isAdmin) {
-        const deniedUrl = request.nextUrl.clone();
-        deniedUrl.pathname = "/dashboard";
-        return NextResponse.redirect(deniedUrl);
+      if (roleData?.role === "ADMIN") {
+        isAdmin = true;
       }
     }
 
-    // For non-admin students, enforce mandatory onboarding completion
-    if (!isAdmin && (pathname.startsWith("/dashboard") || pathname === "/")) {
+    // A. ADMIN USER ROUTING
+    if (isAdmin) {
+      // If admin visits auth routes (/login, /signup, /verify-email), root (/), or student routes (/onboarding, /dashboard)
+      if (
+        (isAuthRoute && !pathname.startsWith("/auth")) ||
+        pathname === "/" ||
+        pathname === "/onboarding" ||
+        pathname.startsWith("/dashboard")
+      ) {
+        const adminUrl = request.nextUrl.clone();
+        adminUrl.pathname = "/admin";
+        return NextResponse.redirect(adminUrl);
+      }
+      // Allow access to /admin and admin APIs
+      return response;
+    }
+
+    // B. STUDENT USER ROUTING
+    // Protect /admin route: Non-admins cannot access /admin
+    if (pathname.startsWith("/admin")) {
+      const deniedUrl = request.nextUrl.clone();
+      deniedUrl.pathname = "/dashboard";
+      return NextResponse.redirect(deniedUrl);
+    }
+
+    // If student visits auth routes (/login, /signup, /verify-email) while authenticated
+    if (isAuthRoute && !pathname.startsWith("/auth")) {
+      const { data: student } = await supabase
+        .from("students")
+        .select("is_profile_completed")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const targetUrl = request.nextUrl.clone();
+      targetUrl.pathname = student?.is_profile_completed ? "/dashboard" : "/onboarding";
+      return NextResponse.redirect(targetUrl);
+    }
+
+    // If student visits /dashboard or / without completing onboarding
+    if (pathname.startsWith("/dashboard") || pathname === "/") {
       const { data: student } = await supabase
         .from("students")
         .select("is_profile_completed")
@@ -111,8 +145,8 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    // If student has already completed onboarding, prevent navigating back to /onboarding
-    if (!isAdmin && pathname === "/onboarding") {
+    // If student has already completed onboarding, prevent accessing /onboarding again
+    if (pathname === "/onboarding") {
       const { data: student } = await supabase
         .from("students")
         .select("is_profile_completed")

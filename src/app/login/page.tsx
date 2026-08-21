@@ -40,30 +40,24 @@ export default function LoginPage() {
         throw new Error("No user returned from authentication.");
       }
 
-      // Check role
-      const { data: roleData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", data.user.id)
-        .maybeSingle();
+      // Authoritative server-side role resolution and routing decision
+      try {
+        const postLoginRes = await fetch("/api/auth/post-login", {
+          method: "POST",
+        });
+        const postLoginData = await postLoginRes.json();
 
-      if (roleData?.role === "ADMIN") {
-        router.push("/admin");
-      } else {
-        // Check student onboarding status
-        const { data: student } = await supabase
-          .from("students")
-          .select("is_profile_completed")
-          .eq("id", data.user.id)
-          .maybeSingle();
-
-        if (!student || !student.is_profile_completed) {
-          router.push("/onboarding");
-        } else {
-          router.push("/dashboard");
+        if (postLoginData.success && postLoginData.targetUrl) {
+          router.push(postLoginData.targetUrl);
+          router.refresh();
+          return;
         }
+      } catch (postLoginErr) {
+        console.error("Post-login routing resolution error:", postLoginErr);
       }
 
+      // Fallback routing if post-login API was unreachable
+      router.push("/dashboard");
       router.refresh();
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to log in. Please check your credentials.");
@@ -79,9 +73,10 @@ export default function LoginPage() {
           <div className="w-12 h-12 rounded-2xl bg-blue-600 mx-auto flex items-center justify-center text-white shadow-lg shadow-blue-500/25">
             <UtensilsCrossed className="w-6 h-6" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Sign In to Smart Mess</h2>
+          <h2 className="text-2xl font-bold text-gray-900">SMART MESS SYSTEM</h2>
+          <p className="text-sm font-semibold text-gray-700">Sign in to your account</p>
           <p className="text-xs text-gray-500">
-            University of Hyderabad Multi-Mess Automation System
+            University of Hyderabad Multi-Mess Automation Platform
           </p>
         </div>
 
@@ -95,7 +90,7 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              University Email (@uohyd.ac.in)
+              Email Address
             </label>
             <div className="relative">
               <Mail className="w-5 h-5 text-gray-400 absolute left-3.5 top-3" />
@@ -103,7 +98,7 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="your.name@uohyd.ac.in"
+                placeholder="name@uohyd.ac.in"
                 required
                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
@@ -151,7 +146,7 @@ export default function LoginPage() {
         <div className="text-center pt-2 border-t border-gray-100 text-xs text-gray-600">
           New university student?{" "}
           <Link href="/signup" className="text-blue-600 font-semibold hover:underline">
-            Register for Mess Access
+            Create your account
           </Link>
         </div>
       </div>

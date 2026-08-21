@@ -67,12 +67,12 @@ function SignupContent() {
         throw new Error(error.message);
       }
 
-      // If user session is returned immediately (e.g. email confirmation auto-confirmed in local dev), redirect to onboarding
+      // If user session is returned immediately (e.g. email auto-confirmed in local dev), redirect to onboarding
       if (data.session) {
         router.push("/onboarding");
         router.refresh();
       } else {
-        // Otherwise, navigate to OTP / verification waiting screen
+        // Redirect to numeric OTP verification screen with email pre-populated
         router.push(`/verify-email?email=${encodeURIComponent(email.trim().toLowerCase())}`);
       }
     } catch (err: any) {
@@ -90,15 +90,15 @@ function SignupContent() {
             <UtensilsCrossed className="w-6 h-6" />
           </div>
           <h2 className="text-2xl font-bold text-gray-900">Student Mess Registration</h2>
-          <p className="text-xs text-gray-500">
-            Create your account with your official university email
+          <p className="text-sm text-gray-600">
+            Create your University of Hyderabad student account
           </p>
         </div>
 
         {/* University Domain Notice Banner */}
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-2.5 text-xs text-blue-900 font-medium">
           <ShieldCheck className="w-4 h-4 text-blue-600 flex-shrink-0" />
-          <span>Restricted to @uohyd.ac.in domain</span>
+          <span>Use your @uohyd.ac.in university email.</span>
         </div>
 
         {errorMsg && (
@@ -168,7 +168,7 @@ function SignupContent() {
             {loading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Sending verification...
+                Sending verification OTP...
               </>
             ) : (
               <>
@@ -192,7 +192,7 @@ function SignupContent() {
 
 export default function SignupPage() {
   return (
-    <Suspense fallback={<div className="text-center py-12 text-sm text-gray-500">Loading signup...</div>}>
+    <Suspense fallback={<div className="text-center py-12 text-sm text-gray-500">Loading registration...</div>}>
       <SignupContent />
     </Suspense>
   );
