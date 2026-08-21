@@ -2,7 +2,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import jsQR from "jsqr";
-import { Camera, CameraOff, AlertCircle, RefreshCw } from "lucide-react";
+import { Camera, CameraOff, RefreshCw } from "lucide-react";
 
 interface QRScannerEngineProps {
   onScan: (qrToken: string) => void;
@@ -25,13 +25,20 @@ export default function QRScannerEngine({
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [facingMode, setFacingMode] = useState<"environment" | "user">("environment");
 
-  // Track latest isPaused/disabled in refs so the requestAnimationFrame loop always reads fresh state
+  // V1.3 Camera Debouncing & In-Flight Lock Architecture
   const isPausedRef = useRef(isPaused);
   const disabledRef = useRef(disabled);
   const onScanRef = useRef(onScan);
+  const isProcessingLockRef = useRef<boolean>(false);
+  const lastScannedTokenRef = useRef<string>("");
+  const lastScannedTimestampRef = useRef<number>(0);
 
   useEffect(() => {
     isPausedRef.current = isPaused;
+    // Release the processing lock when the scanner returns to unpaused / live scanning mode
+    if (!isPaused) {
+      isProcessingLockRef.current = false;
+    }
   }, [isPaused]);
 
   useEffect(() => {
@@ -89,7 +96,7 @@ export default function QRScannerEngine({
     }
   }, [facingMode]);
 
-  // Frame scanning loop
+  // Frame scanning loop with strict debouncing
   const scanFrame = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) {
       animationFrameIdRef.current = requestAnimationFrame(scanFrame);
@@ -100,10 +107,12 @@ export default function QRScannerEngine({
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
+    // Guard: Do not decode if scanner is paused, disabled, or locked during in-flight processing
     if (
       video.readyState === video.HAVE_ENOUGH_DATA &&
       !isPausedRef.current &&
       !disabledRef.current &&
+      !isProcessingLockRef.current &&
       ctx
     ) {
       canvas.width = video.videoWidth;
@@ -118,9 +127,22 @@ export default function QRScannerEngine({
         });
 
         if (code && code.data && code.data.trim().length > 0) {
-          const rawToken = code.data.trim();
-          // Notify parent of detected QR token
-          onScanRef.current(rawToken);
+          const rawToken = code.data.trim().toUpperCase();
+          const now = Date.now();
+
+          // Debounce check: Prevent duplicate triggers within 1500ms for identical token
+          const isDuplicateDebounce =
+            rawToken === lastScannedTokenRef.current && now - lastScannedTimestampRef.current < 1500;
+
+          if (!isDuplicateDebounce && !isProcessingLockRef.current) {
+            // Engage atomic lock
+            isProcessingLockRef.current = true;
+            lastScannedTokenRef.current = rawToken;
+            lastScannedTimestampRef.current = now;
+
+            // Notify parent of detected QR token
+            onScanRef.current(rawToken);
+          }
         }
       }
     }

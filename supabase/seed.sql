@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_mess_credentials_qr_token ON public.mess_credenti
 CREATE INDEX IF NOT EXISTS idx_mess_credentials_student_id ON public.mess_credentials(student_id);
 CREATE INDEX IF NOT EXISTS idx_mess_credentials_status ON public.mess_credentials(status);
 
--- 6. MEAL TRANSACTIONS TABLE (V1.2 Finalized Meal Approvals & Rejections)
+-- 6. MEAL TRANSACTIONS TABLE (V1.2 / V1.3 Finalized Meal Approvals & Rejections)
 CREATE TABLE IF NOT EXISTS public.meal_transactions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES public.students(id) ON DELETE CASCADE,
@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS public.meal_transactions (
     meal_type VARCHAR(20) NOT NULL CHECK (meal_type IN ('BREAKFAST', 'LUNCH', 'DINNER')),
     meal_date DATE NOT NULL DEFAULT CURRENT_DATE,
     status VARCHAR(20) NOT NULL CHECK (status IN ('APPROVED', 'REJECTED')),
+    verification_method VARCHAR(20) NOT NULL DEFAULT 'QR' CHECK (verification_method IN ('QR', 'MANUAL')),
     rejection_reason VARCHAR(100),
     scanned_by UUID REFERENCES auth.users(id),
     scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -130,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_meal_transactions_student_id ON public.meal_trans
 CREATE INDEX IF NOT EXISTS idx_meal_transactions_mess_id ON public.meal_transactions(mess_id);
 CREATE INDEX IF NOT EXISTS idx_meal_transactions_date_meal ON public.meal_transactions(meal_date, meal_type);
 CREATE INDEX IF NOT EXISTS idx_meal_transactions_status ON public.meal_transactions(status);
+CREATE INDEX IF NOT EXISTS idx_meal_transactions_verification_method ON public.meal_transactions(verification_method);
 
 -- 7. UPDATED_AT TRIGGERS
 CREATE OR REPLACE FUNCTION public.handle_updated_at()

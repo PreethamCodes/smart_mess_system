@@ -5,19 +5,21 @@ import {
   MealType,
   ScannerState,
   EligibilityResult,
+  StudentVerificationDetails,
 } from "@/types/database";
 import { getMealDisplayName, getMealTimeWindow } from "@/lib/meals/config";
 import QRScannerEngine from "./QRScannerEngine";
 import StudentScanResultCard from "./StudentScanResultCard";
+import ManualStudentVerificationModal from "./ManualStudentVerificationModal";
 import {
   UtensilsCrossed,
-  ShieldCheck,
   CheckCircle2,
   XCircle,
   Users,
   LogOut,
   Clock,
   Sparkles,
+  Search,
 } from "lucide-react";
 
 interface ContinuousMealScannerProps {
@@ -34,6 +36,7 @@ interface ScanLogItem {
   studentId: string;
   status: "APPROVED" | "REJECTED";
   reason?: string | null;
+  method: "QR" | "MANUAL";
 }
 
 export default function ContinuousMealScanner({
@@ -45,6 +48,7 @@ export default function ContinuousMealScanner({
   const [scannerState, setScannerState] = useState<ScannerState>("SCANNING");
   const [currentResult, setCurrentResult] = useState<EligibilityResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isManualModalOpen, setIsManualModalOpen] = useState<boolean>(false);
 
   // Live Session KPIs
   const [sessionStats, setSessionStats] = useState({
@@ -57,7 +61,7 @@ export default function ContinuousMealScanner({
   const [recentLogs, setRecentLogs] = useState<ScanLogItem[]>([]);
 
   // ---------------------------------------------------------------------------
-  // 1. QR Code Detected Handler
+  // 1. QR Code Detected Handler (Debounced & Pauses Automatically)
   // ---------------------------------------------------------------------------
   const handleScan = useCallback(
     async (rawToken: string) => {
@@ -86,6 +90,7 @@ export default function ContinuousMealScanner({
           throw new Error((data as any).error || "Failed to verify credential.");
         }
 
+        data.verificationMethod = "QR";
         setCurrentResult(data);
         setScannerState(data.status); // 'ELIGIBLE' or 'REJECTED'
       } catch (err: any) {
@@ -102,6 +107,7 @@ export default function ContinuousMealScanner({
           sessionMessId: messId,
           mealType,
           mealDate: new Date().toISOString().split("T")[0],
+          verificationMethod: "QR",
         });
         setScannerState("REJECTED");
       }
@@ -110,66 +116,126 @@ export default function ContinuousMealScanner({
   );
 
   // ---------------------------------------------------------------------------
-  // 2. NEXT Button Handler: Finalize Transaction & Automatically Resume Scanner
+  // 2. NEXT Button Handler (Supports Approval and Manual Rejection)
   // ---------------------------------------------------------------------------
-  const handleNext = useCallback(async () => {
-    if (!currentResult || scannerState === "FINALIZING") {
-      return;
-    }
-
-    setScannerState("FINALIZING");
-    setErrorMessage(null);
-
-    const isApproved = currentResult.isEligible;
-    const studentId = currentResult.student?.id;
-
-    try {
-      if (studentId) {
-        // Record finalized transaction to backend database
-        await fetch("/api/scanner/finalize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            student_id: studentId,
-            mess_id: messId,
-            meal_type: mealType,
-            status: isApproved ? "APPROVED" : "REJECTED",
-            rejection_reason: currentResult.rejectionReason,
-            meal_date: currentResult.mealDate,
-          }),
-        });
+  const handleNext = useCallback(
+    async (overrideStatus?: "APPROVED" | "REJECTED", overrideReason?: string) => {
+      if (!currentResult || scannerState === "FINALIZING") {
+        return;
       }
 
-      // Update Live Session KPIs
-      setSessionStats((prev) => ({
-        totalScanned: prev.totalScanned + 1,
-        approvedCount: prev.approvedCount + (isApproved ? 1 : 0),
-        rejectedCount: prev.rejectedCount + (!isApproved ? 1 : 0),
-      }));
+      setScannerState("FINALIZING");
+      setErrorMessage(null);
 
-      // Add to recent activity audit trail
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-      const logEntry: ScanLogItem = {
-        id: `${Date.now()}-${Math.random()}`,
-        time: timeStr,
-        name: currentResult.student?.name || "Unrecognized Student",
-        studentId: currentResult.student?.student_id || "N/A",
-        status: isApproved ? "APPROVED" : "REJECTED",
-        reason: currentResult.rejectionReason,
-      };
+      // Determine final status (either engine verdict or manual override)
+      const finalStatus = overrideStatus || (currentResult.isEligible ? "APPROVED" : "REJECTED");
+      const isApproved = finalStatus === "APPROVED";
+      const finalReason = isApproved
+        ? null
+        : overrideReason || currentResult.rejectionReason || "Rejected by operator";
 
-      setRecentLogs((prev) => [logEntry, ...prev.slice(0, 7)]); // Keep last 8 entries
-    } catch (err: any) {
-      console.error("Finalization error:", err);
-    } finally {
-      // -----------------------------------------------------------------------
-      // CRITICAL: Reset current student state and AUTOMATICALLY resume scanning
-      // -----------------------------------------------------------------------
-      setCurrentResult(null);
-      setScannerState("SCANNING");
+      const studentId = currentResult.student?.id;
+
+      try {
+        if (studentId) {
+          // Record finalized transaction to backend database with verification_method
+          await fetch("/api/scanner/finalize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              student_id: studentId,
+              mess_id: messId,
+              meal_type: mealType,
+              status: finalStatus,
+              verification_method: currentResult.verificationMethod || "QR",
+              rejection_reason: finalReason,
+              meal_date: currentResult.mealDate,
+            }),
+          });
+        }
+
+        // Update Live Session KPIs
+        setSessionStats((prev) => ({
+          totalScanned: prev.totalScanned + 1,
+          approvedCount: prev.approvedCount + (isApproved ? 1 : 0),
+          rejectedCount: prev.rejectedCount + (!isApproved ? 1 : 0),
+        }));
+
+        // Add to recent activity audit trail
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const logEntry: ScanLogItem = {
+          id: `${Date.now()}-${Math.random()}`,
+          time: timeStr,
+          name: currentResult.student?.name || "Unrecognized Student",
+          studentId: currentResult.student?.student_id || "N/A",
+          status: finalStatus,
+          reason: finalReason,
+          method: currentResult.verificationMethod || "QR",
+        };
+
+        setRecentLogs((prev) => [logEntry, ...prev.slice(0, 7)]); // Keep last 8 entries
+      } catch (err: any) {
+        console.error("Finalization error:", err);
+      } finally {
+        // ---------------------------------------------------------------------
+        // CRITICAL: Reset student state and AUTOMATICALLY resume live scanning
+        // ---------------------------------------------------------------------
+        setCurrentResult(null);
+        setScannerState("SCANNING");
+      }
+    },
+    [currentResult, scannerState, messId, mealType]
+  );
+
+  // ---------------------------------------------------------------------------
+  // 3. Manual Student Verification Approval Handler (V1.3 Feature 4)
+  // ---------------------------------------------------------------------------
+  const handleApproveManual = async (
+    student: StudentVerificationDetails,
+    mealDate: string
+  ) => {
+    const res = await fetch("/api/scanner/finalize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        student_id: student.id,
+        mess_id: messId,
+        meal_type: mealType,
+        status: "APPROVED",
+        verification_method: "MANUAL",
+        rejection_reason: null,
+        meal_date: mealDate,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to record manual approval transaction.");
     }
-  }, [currentResult, scannerState, messId, mealType]);
+
+    // Update Live Session KPIs
+    setSessionStats((prev) => ({
+      totalScanned: prev.totalScanned + 1,
+      approvedCount: prev.approvedCount + 1,
+      rejectedCount: prev.rejectedCount,
+    }));
+
+    // Add to audit trail
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const logEntry: ScanLogItem = {
+      id: `${Date.now()}-${Math.random()}`,
+      time: timeStr,
+      name: student.name,
+      studentId: student.student_id,
+      status: "APPROVED",
+      reason: null,
+      method: "MANUAL",
+    };
+
+    setRecentLogs((prev) => [logEntry, ...prev.slice(0, 7)]);
+  };
 
   const isScannerPaused = scannerState !== "SCANNING";
 
@@ -196,8 +262,17 @@ export default function ContinuousMealScanner({
             </h1>
           </div>
 
-          {/* Session KPIs + End Session Button */}
+          {/* Session KPIs + Manual Search & End Session Buttons */}
           <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsManualModalOpen(true)}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-2xl text-xs font-bold tracking-wider uppercase border border-blue-400/30 shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
+            >
+              <Search className="w-4 h-4" />
+              <span>Manual Student Search</span>
+            </button>
+
             <div className="bg-white/10 backdrop-blur rounded-2xl px-4 py-2 text-center border border-white/10">
               <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider block">Approved</span>
               <span className="text-xl font-extrabold text-emerald-400">{sessionStats.approvedCount}</span>
@@ -209,7 +284,7 @@ export default function ContinuousMealScanner({
             <button
               type="button"
               onClick={onEndSession}
-              className="px-4 py-3 bg-white/10 hover:bg-rose-600 active:bg-rose-700 text-white rounded-2xl text-xs font-bold tracking-wider uppercase border border-white/20 transition-all flex items-center gap-2 ml-auto sm:ml-0"
+              className="px-4 py-2.5 bg-white/10 hover:bg-rose-600 active:bg-rose-700 text-white rounded-2xl text-xs font-bold tracking-wider uppercase border border-white/20 transition-all flex items-center gap-2 ml-auto sm:ml-0"
             >
               <LogOut className="w-4 h-4" />
               <span>End Session</span>
@@ -239,7 +314,7 @@ export default function ContinuousMealScanner({
               </span>
             </div>
 
-            {/* Continuous Camera Feed */}
+            {/* Continuous Camera Feed with In-Flight Debouncing */}
             <QRScannerEngine
               onScan={handleScan}
               isPaused={isScannerPaused}
@@ -251,14 +326,24 @@ export default function ContinuousMealScanner({
             </p>
           </div>
 
+          {/* Quick Manual Verification Fallback Button */}
+          <button
+            type="button"
+            onClick={() => setIsManualModalOpen(true)}
+            className="w-full py-3.5 px-4 bg-white hover:bg-gray-50 border border-gray-300 rounded-2xl text-xs font-bold text-gray-700 flex items-center justify-center gap-2 shadow-sm transition-all"
+          >
+            <Search className="w-4 h-4 text-blue-600" />
+            <span>Card Damaged / Unreadable? Use Manual Verification</span>
+          </button>
+
           {/* Quick Session Guidelines */}
           <div className="bg-blue-50/75 border border-blue-200/80 rounded-2xl p-4 text-xs text-blue-900 space-y-1.5">
             <div className="font-bold flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-blue-600" />
-              <span>Continuous Scanning Operation</span>
+              <span>V1.3 Reliable Operations</span>
             </div>
             <p className="text-blue-800 text-[11px] leading-relaxed">
-              Verify student identity visually. Press <strong className="font-bold">NEXT</strong> (or hit <kbd className="px-1 py-0.5 bg-white rounded border font-mono">Enter</kbd>) to finalize the meal and immediately scan the next student in line.
+              Verify student identity visually. Press <strong className="font-bold">NEXT</strong> to approve, or click <strong className="font-bold">REJECT</strong> to manually record a mismatch. Pressing NEXT automatically records the decision and resumes scanning.
             </p>
           </div>
         </div>
@@ -301,6 +386,11 @@ export default function ContinuousMealScanner({
                         <span className="font-mono text-[11px] text-gray-500">
                           {log.studentId}
                         </span>
+                        {log.method === "MANUAL" && (
+                          <span className="ml-2 px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-[10px] font-bold">
+                            MANUAL
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -323,6 +413,16 @@ export default function ContinuousMealScanner({
           )}
         </div>
       </div>
+
+      {/* Manual Student Verification Modal */}
+      <ManualStudentVerificationModal
+        isOpen={isManualModalOpen}
+        onClose={() => setIsManualModalOpen(false)}
+        messId={messId}
+        messName={messName}
+        mealType={mealType}
+        onApproveManual={handleApproveManual}
+      />
     </div>
   );
 }

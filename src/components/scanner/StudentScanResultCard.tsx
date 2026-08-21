@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import {
   EligibilityResult,
   getAbsoluteSemester,
+  RejectionReasonCode,
 } from "@/types/database";
+import { REJECTION_MESSAGES } from "@/lib/meals/config";
 import {
   CheckCircle2,
   XCircle,
@@ -16,11 +18,13 @@ import {
   UtensilsCrossed,
   Home,
   CreditCard,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
 
 interface StudentScanResultCardProps {
   result: EligibilityResult | null;
-  onNext: () => void;
+  onNext: (overrideStatus?: "APPROVED" | "REJECTED", overrideReason?: string) => void;
   isFinalizing: boolean;
 }
 
@@ -29,21 +33,40 @@ export default function StudentScanResultCard({
   onNext,
   isFinalizing,
 }: StudentScanResultCardProps) {
+  // Manual Rejection State
+  const [isManualRejectMode, setIsManualRejectMode] = useState<boolean>(false);
+  const [selectedRejectionReason, setSelectedRejectionReason] = useState<string>(
+    REJECTION_MESSAGES.STUDENT_MISMATCH
+  );
+
+  // Reset manual rejection mode when result changes
+  useEffect(() => {
+    setIsManualRejectMode(false);
+    setSelectedRejectionReason(REJECTION_MESSAGES.STUDENT_MISMATCH);
+  }, [result?.scannedToken, result?.student?.id]);
+
   // Listen for Enter or Space keyboard shortcut to trigger NEXT for ultra-fast throughput
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
-        // Prevent default page scroll if space was pressed
+        // Only trigger if not focused in an input/select
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
         e.preventDefault();
         if (!isFinalizing && result) {
-          onNext();
+          if (isManualRejectMode) {
+            onNext("REJECTED", selectedRejectionReason);
+          } else {
+            onNext();
+          }
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onNext, isFinalizing, result]);
+  }, [onNext, isFinalizing, result, isManualRejectMode, selectedRejectionReason]);
 
   if (!result) {
     return (
@@ -62,11 +85,20 @@ export default function StudentScanResultCard({
   }
 
   const { isEligible, rejectionReason, student } = result;
+  const isDisplayingEligible = isEligible && !isManualRejectMode;
+
+  const handleNextClick = () => {
+    if (isManualRejectMode) {
+      onNext("REJECTED", selectedRejectionReason);
+    } else {
+      onNext();
+    }
+  };
 
   return (
     <div
       className={`rounded-3xl border shadow-xl overflow-hidden transition-all duration-300 flex flex-col justify-between ${
-        isEligible
+        isDisplayingEligible
           ? "bg-white border-emerald-300 shadow-emerald-500/10"
           : "bg-white border-rose-300 shadow-rose-500/10"
       }`}
@@ -74,13 +106,13 @@ export default function StudentScanResultCard({
       {/* Top Eligibility Status Banner */}
       <div
         className={`px-6 py-4 flex items-center justify-between text-white ${
-          isEligible
+          isDisplayingEligible
             ? "bg-gradient-to-r from-emerald-600 to-teal-600"
             : "bg-gradient-to-r from-rose-600 to-red-700"
         }`}
       >
         <div className="flex items-center gap-3">
-          {isEligible ? (
+          {isDisplayingEligible ? (
             <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur flex items-center justify-center">
               <CheckCircle2 className="w-6 h-6 text-white" />
             </div>
@@ -91,17 +123,17 @@ export default function StudentScanResultCard({
           )}
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-white/80 block">
-              Verification Result
+              {isManualRejectMode ? "Operator Manual Override" : "Verification Result"}
             </span>
             <div className="text-xl font-extrabold tracking-tight">
-              {isEligible ? "✓ ELIGIBLE" : "✗ REJECTED"}
+              {isDisplayingEligible ? "✓ ELIGIBLE" : "✗ REJECTED"}
             </div>
           </div>
         </div>
 
-        {!isEligible && rejectionReason && (
+        {!isDisplayingEligible && (
           <div className="px-3 py-1 bg-white/20 backdrop-blur rounded-lg text-xs font-bold text-white border border-white/30">
-            {rejectionReason}
+            {isManualRejectMode ? selectedRejectionReason : rejectionReason}
           </div>
         )}
       </div>
@@ -143,6 +175,11 @@ export default function StudentScanResultCard({
                   <span className="text-xs text-gray-500 font-medium">
                     {student.course} • Sem {getAbsoluteSemester(student.year, student.semester)}
                   </span>
+                  {result.verificationMethod === "MANUAL" && (
+                    <span className="px-2 py-0.5 rounded bg-purple-100 text-purple-800 text-[10px] font-bold tracking-wider uppercase border border-purple-200">
+                      Manual Entry
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -209,12 +246,35 @@ export default function StudentScanResultCard({
             </p>
           </div>
         )}
+
+        {/* Manual Rejection Selection Panel (V1.3 Feature 3) */}
+        {isManualRejectMode && (
+          <div className="p-4 bg-rose-50/80 border border-rose-200 rounded-2xl space-y-2 animate-in fade-in duration-200">
+            <label className="block text-xs font-bold text-rose-900 uppercase tracking-wider">
+              Select Manual Rejection Reason *
+            </label>
+            <select
+              value={selectedRejectionReason}
+              onChange={(e) => setSelectedRejectionReason(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-rose-300 bg-white text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-600"
+            >
+              {Object.entries(REJECTION_MESSAGES).map(([code, message]) => (
+                <option key={code} value={message}>
+                  {message}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-rose-700">
+              Pressing NEXT will record this student as REJECTED with the selected reason and resume the scanner.
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Action Footer: NEXT Button */}
+      {/* Action Footer: NEXT and REJECT Buttons */}
       <div className="p-6 bg-gray-50 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="text-xs text-gray-500 flex items-center gap-2">
-          <span>Keyboard shortcut:</span>
+          <span>Keyboard:</span>
           <kbd className="px-2 py-1 bg-white border border-gray-300 rounded-md font-mono text-[11px] font-bold shadow-sm">
             Enter ↵
           </kbd>
@@ -224,28 +284,56 @@ export default function StudentScanResultCard({
           </kbd>
         </div>
 
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={isFinalizing}
-          className={`w-full sm:w-auto px-8 py-4 rounded-2xl font-black text-base uppercase tracking-wider flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 disabled:opacity-50 ${
-            isEligible
-              ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white shadow-emerald-500/25"
-              : "bg-gray-900 hover:bg-gray-800 active:bg-black text-white shadow-gray-900/20"
-          }`}
-        >
-          {isFinalizing ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>Finalizing...</span>
-            </>
-          ) : (
-            <>
-              <span>NEXT STUDENT</span>
-              <ArrowRight className="w-5 h-5" />
-            </>
+        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+          {/* Manual Rejection Trigger Buttons */}
+          {isEligible && !isManualRejectMode && (
+            <button
+              type="button"
+              onClick={() => setIsManualRejectMode(true)}
+              disabled={isFinalizing}
+              className="w-full sm:w-auto px-5 py-4 rounded-2xl font-bold text-sm tracking-wider uppercase border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 active:bg-rose-200 transition-all flex items-center justify-center gap-2"
+            >
+              <Ban className="w-4 h-4" />
+              <span>REJECT</span>
+            </button>
           )}
-        </button>
+
+          {isManualRejectMode && (
+            <button
+              type="button"
+              onClick={() => setIsManualRejectMode(false)}
+              disabled={isFinalizing}
+              className="w-full sm:w-auto px-4 py-4 rounded-2xl font-bold text-sm tracking-wider uppercase border border-gray-300 text-gray-700 bg-white hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
+            >
+              <RotateCcw className="w-4 h-4" />
+              <span>CANCEL REJECT</span>
+            </button>
+          )}
+
+          {/* Primary NEXT / FINALIZE Button */}
+          <button
+            type="button"
+            onClick={handleNextClick}
+            disabled={isFinalizing}
+            className={`w-full sm:w-auto px-8 py-4 rounded-2xl font-black text-base uppercase tracking-wider flex items-center justify-center gap-3 shadow-xl transition-all active:scale-95 disabled:opacity-50 ${
+              isDisplayingEligible
+                ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white shadow-emerald-500/25"
+                : "bg-gray-900 hover:bg-gray-800 active:bg-black text-white shadow-gray-900/20"
+            }`}
+          >
+            {isFinalizing ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Finalizing...</span>
+              </>
+            ) : (
+              <>
+                <span>NEXT STUDENT</span>
+                <ArrowRight className="w-5 h-5" />
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

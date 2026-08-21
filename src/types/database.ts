@@ -12,6 +12,8 @@ export type MealType = "BREAKFAST" | "LUNCH" | "DINNER";
 
 export type MealTransactionStatus = "APPROVED" | "REJECTED";
 
+export type VerificationMethod = "QR" | "MANUAL";
+
 export type RejectionReasonCode =
   | "INVALID_CARD"
   | "BLOCKED_CARD"
@@ -30,7 +32,8 @@ export type ScannerState =
   | "PROCESSING"
   | "ELIGIBLE"
   | "REJECTED"
-  | "FINALIZING";
+  | "FINALIZING"
+  | "MANUAL_ENTRY";
 
 export interface Mess {
   id: string;
@@ -98,6 +101,7 @@ export interface MealTransaction {
   meal_type: MealType;
   meal_date: string; // YYYY-MM-DD
   status: MealTransactionStatus;
+  verification_method: VerificationMethod;
   rejection_reason: string | null;
   scanned_by: string | null;
   scanned_at: string;
@@ -133,6 +137,7 @@ export interface EligibilityResult {
   sessionMessId: string;
   mealType: MealType;
   mealDate: string;
+  verificationMethod?: VerificationMethod;
 }
 
 /**

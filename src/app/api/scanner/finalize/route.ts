@@ -2,18 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isPreconfiguredAdminEmail } from "@/lib/auth/roles";
-import { MealType, MealTransactionStatus } from "@/types/database";
+import { MealType, MealTransactionStatus, VerificationMethod } from "@/types/database";
 import { getFormattedDate } from "@/lib/meals/config";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Meal Transaction Finalization Endpoint
+ * Meal Transaction Finalization Endpoint (V1.3 Reliable Recording)
  * 
- * Invoked when the operator clicks NEXT to finalize the meal approval or rejection:
- * 1. Persists transaction audit record into public.meal_transactions.
- * 2. Enforces partial unique index for APPROVED meals on the same date.
- * 3. Returns the finalized transaction metadata to allow the scanner to resume.
+ * Invoked when the operator clicks NEXT or APPROVE MEAL to finalize:
+ * 1. Persists transaction audit record with verification_method ('QR' vs 'MANUAL').
+ * 2. Enforces partial unique index for APPROVED meals on the same date (database-level concurrency safety).
+ * 3. Returns the finalized transaction metadata.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
       mess_id,
       meal_type,
       status,
+      verification_method = "QR",
       rejection_reason = null,
       meal_date,
     } = body as {
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
       mess_id: string;
       meal_type: MealType;
       status: MealTransactionStatus;
+      verification_method?: VerificationMethod;
       rejection_reason?: string | null;
       meal_date?: string;
     };
@@ -103,7 +105,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 2. Insert Finalized Transaction
+    // 2. Insert Finalized Transaction with Verification Method
     const { data: transaction, error: insertError } = await adminDb
       .from("meal_transactions")
       .insert({
@@ -112,6 +114,7 @@ export async function POST(request: NextRequest) {
         meal_type,
         meal_date: dateToRecord,
         status,
+        verification_method: verification_method === "MANUAL" ? "MANUAL" : "QR",
         rejection_reason: status === "REJECTED" ? rejection_reason : null,
         scanned_by: user.id,
       })
@@ -145,6 +148,7 @@ export async function POST(request: NextRequest) {
       mealType: meal_type,
       mealDate: dateToRecord,
       status: transaction.status,
+      verificationMethod: transaction.verification_method,
       scannedAt: transaction.scanned_at,
     });
   } catch (err: any) {
