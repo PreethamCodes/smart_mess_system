@@ -1,10 +1,8 @@
 {
-  "/dashboard/page": "app/dashboard/page.js",
   "/login/page": "app/login/page.js",
-  "/dashboard/qr/page": "app/dashboard/qr/page.js",
+  "/verify-email/page": "app/verify-email/page.js",
   "/admin/page": "app/admin/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
   "/admin/scanner/page": "app/admin/scanner/page.js",
-  "/api/scanner/manual-verify/route": "app/api/scanner/manual-verify/route.js",
-  "/api/scanner/finalize/route": "app/api/scanner/finalize/route.js",
-  "/api/scanner/verify/route": "app/api/scanner/verify/route.js"
+  "/api/auth/post-login/route": "app/api/auth/post-login/route.js"
 }

@@ -6,7 +6,11 @@ node_modules/
 # Testing
 coverage/
 
-
+# Next.js build output
+.next/
+out/
+build/
+dist/
 # Production
 *.pem
 
